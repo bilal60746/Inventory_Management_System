@@ -6,21 +6,52 @@ on:
       - main
 
 jobs:
-  sonar-scan:
+  sonarqube:
     runs-on: ubuntu-latest
     services:
+      db:
+        image: postgres:14
+        env:
+          POSTGRES_USER: sonar
+          POSTGRES_PASSWORD: sonar
+          POSTGRES_DB: sonarqube
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U sonar"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
       sonarqube:
-        image: sonarqube:latest
+        image: sonarqube:community
+        env:
+          SONAR_JDBC_URL: jdbc:postgresql://db:5432/sonarqube
+          SONAR_JDBC_USERNAME: sonar
+          SONAR_JDBC_PASSWORD: sonar
         ports:
           - 9000:9000
         options: >-
-          --health-cmd="curl --fail http://localhost:9000/api/system/health || exit 1"
+          --health-cmd="curl -s http://localhost:9000/api/system/health | grep -q '\"status\":\"UP\"'"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=10
+          --health-retries=15
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Wait for SonarQube to be ready
+        run: |
+          echo "Waiting for SonarQube to be UP..."
+          for i in {1..30}; do
+            STATUS=$(curl -s http://localhost:9000/api/system/health | jq -r .status)
+            echo "Status: $STATUS"
+            if [ "$STATUS" = "UP" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v3
@@ -28,16 +59,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Wait for SonarQube to be ready
-        run: |
-          echo "Waiting for SonarQube..."
-          for i in {1..30}; do
-            curl -s http://localhost:9000/api/system/status | grep -q '"status":"UP"' && break
-            sleep 5
-          done
-
-      - name: Run SonarQube scan
+      - name: Run SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v5
         with:
           host-url: http://localhost:9000
           token: ${{ secrets.SONAR_TOKEN }}
+

@@ -1,13 +1,14 @@
-name: Build
+name: SonarQube Scan (Self-hosted)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
 
 jobs:
-  sonarqube:
+  sonar-scan:
     runs-on: ubuntu-latest
+
     services:
       db:
         image: postgres:14
@@ -21,7 +22,7 @@ jobs:
           --health-cmd="pg_isready -U sonar"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=5
+          --health-retries=10
 
       sonarqube:
         image: sonarqube:community
@@ -35,22 +36,23 @@ jobs:
           --health-cmd="curl -s http://localhost:9000/api/system/health | grep -q '\"status\":\"UP\"'"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=15
+          --health-retries=30
 
     steps:
       - name: Wait for SonarQube to be ready
         run: |
-          echo "Waiting for SonarQube to be UP..."
+          echo "Waiting for SonarQube to be healthy..."
           for i in {1..30}; do
-            STATUS=$(curl -s http://localhost:9000/api/system/health | jq -r .status)
+            STATUS=$(curl -s http://localhost:9000/api/system/health | jq -r .status || echo "UNKNOWN")
             echo "Status: $STATUS"
             if [ "$STATUS" = "UP" ]; then
+              echo "✅ SonarQube is UP"
               break
             fi
             sleep 5
           done
 
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Java
@@ -59,9 +61,14 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Run SonarQube Scan
+      - name: Run SonarQube scan
         uses: SonarSource/sonarqube-scan-action@v5
         with:
           host-url: http://localhost:9000
           token: ${{ secrets.SONAR_TOKEN }}
 
+      - name: Show logs if failed
+        if: failure()
+        run: |
+          echo "🪵 Dumping SonarQube container logs:"
+          docker logs $(docker ps -aqf "name=sonarqube")

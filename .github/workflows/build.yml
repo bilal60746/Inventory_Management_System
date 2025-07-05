@@ -1,74 +1,19 @@
-name: SonarQube Scan (Self-hosted)
-
+name: Build
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-
+    types: [opened, synchronize, reopened]
 jobs:
-  sonar-scan:
+  sonarqube:
+    name: SonarQube
     runs-on: ubuntu-latest
-
-    services:
-      db:
-        image: postgres:14
-        env:
-          POSTGRES_USER: sonar
-          POSTGRES_PASSWORD: sonar
-          POSTGRES_DB: sonarqube
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U sonar"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-
-      sonarqube:
-        image: sonarqube:community
-        env:
-          SONAR_JDBC_URL: jdbc:postgresql://db:5432/sonarqube
-          SONAR_JDBC_USERNAME: sonar
-          SONAR_JDBC_PASSWORD: sonar
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd="curl -s http://localhost:9000/api/system/health | grep -q '\"status\":\"UP\"'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=30
-
     steps:
-      - name: Wait for SonarQube to be ready
-        run: |
-          echo "Waiting for SonarQube to be healthy..."
-          for i in {1..30}; do
-            STATUS=$(curl -s http://localhost:9000/api/system/health | jq -r .status || echo "UNKNOWN")
-            echo "Status: $STATUS"
-            if [ "$STATUS" = "UP" ]; then
-              echo "✅ SonarQube is UP"
-              break
-            fi
-            sleep 5
-          done
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v3
+      - uses: actions/checkout@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Run SonarQube scan
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v5
-        with:
-          host-url: http://localhost:9000
-          token: ${{ secrets.SONAR_TOKEN }}
-
-      - name: Show logs if failed
-        if: failure()
-        run: |
-          echo "🪵 Dumping SonarQube container logs:"
-          docker logs $(docker ps -aqf "name=sonarqube")
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
